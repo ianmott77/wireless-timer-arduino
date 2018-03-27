@@ -2,7 +2,7 @@
 #define PACKET_H
 
 #include <Arduino.h>
-enum DataType{INT = 0, FLOAT = 1, LONG = 2, ULONG = 3, STRING = 4};
+enum DataType{INT = 1, FLOAT = 2, LONG = 3, ULONG = 4, STRING = 5};
 
 class Packet{
 	public:

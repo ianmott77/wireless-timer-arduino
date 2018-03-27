@@ -20,6 +20,13 @@ int getChoice(){
     return choice;
 }
 
+bool getResetStatus(){
+    return resetStat;
+}
+
+void setResetStatus(bool res){
+    resetStat = res;
+}
 void setRecv(bool recd){
     recv = recd;
 }
@@ -44,6 +51,14 @@ bool hasDeviceTypeSent(){
     return deviceTypeSent;
 }
 
+int getCurrentError(){
+    return currentError;
+}
+
+void setCurrentError(int err){
+    currentError = err;
+}
+
 void setStartTime(unsigned long s){
     start = s;
 }
@@ -59,7 +74,7 @@ void rec_confirm_distance(Packet * pack){
 
 void rec_confirm_distance_cb(){
     recData = false;
-    if(confDistData > 1){
+    if(confDistData >= 0){
         finishDistance = confDistData;
         foundDistance = true;
     }
@@ -100,7 +115,6 @@ TimingEye * getEye(){
 }
 
 void find_timing_distance(){
-    switchTo(SER);
     setHandlers(rec_confirm_distance, send_distance);
     setSendCallback(send_distance_cb);
     setReceiveCallback(rec_confirm_distance_cb);
@@ -118,8 +132,31 @@ void starter(){
 }
 
 void interval_timer(){
+    racerCount++;
     setReceiveHandler(interval_rec_bib);
     setReceiveCallback(interval_rec_bib_cb);
+}
+
+void new_racer(Packet * p){
+    newRacerConf = *(int*) p->data;
+}
+
+void new_racer_cb(){
+    setI2COriginating(false);
+    if(newRacerConf == 4){
+        interval_timer();
+
+        //bib
+        while(!available());
+        receive();
+        
+        //start time    
+        while(!available());
+        receive();
+
+    }else if(newRacerConf == 0){
+        dnfStatus = true;
+    }
 }
 
 void interval_rec_bib(Packet* pack){
@@ -133,6 +170,13 @@ void interval_rec_bib_cb(){
 
 void interval_rec_millis(Packet* pack){
     memcpy(&start, (unsigned long*) pack->data, pack->size);
+}
+
+void interval_rec_millis_cb(){
+    interval_racer_init();
+    if(!intervalLoop){
+        catch_interval();
+    }
 }
 
 Packet * send_prev_interval(){
@@ -155,7 +199,7 @@ void send_prev_interval_cb(){
     }
 }
 
-void interval_rec_millis_cb(){
+void interval_racer_init(){
     //start polling for data
     setPiAwake(false);
     setChoiceSent(false);
@@ -174,25 +218,52 @@ void interval_rec_millis_cb(){
             send();
         }
     }
-    
-    
-    interval = catch_interval();
-    
+}
+
+
+
+void send_time(){
     setPiAwake(false);
+
+
     wake_up_pi();
+    
+
     //check if we woke up the Pi
     if(isPiAwake()){        
-        setSendHandler(send_time);
+        setSendHandler(send_time_init);
         setSendCallback(send_time_cb);
+
+        //send confirmation of sending time
         send();
+
+        //send interval
+        send();
+
+        //send racerCount
+        send();
+
     }
 }
 
-Packet * send_time(){
-    return new Packet(&interval, ULONG, sizeof(interval), 0);
+Packet * send_time_init(){
+    timeCount++;
+    if(timeCount == 1){
+        return new Packet(&timeCount, INT, sizeof(timeCount), 0); //easy way of sending 1
+    }else if(timeCount == 2){
+        return new Packet(&interval, ULONG, sizeof(interval), 0);
+    }else if(timeCount == 3){
+        return new Packet(&racerCount, INT, sizeof(racerCount), 0);
+    }
 }
 
-void send_time_cb(){}
+void send_time_cb(){
+    if(timeCount == 2){
+        racerCount--;
+    }else if(timeCount > 2){
+        timeCount = 0;
+    }
+}
 
 Packet * send_interval(){
     return new Packet(&interval, ULONG, sizeof(interval), getMyPosition()-1);
@@ -248,16 +319,81 @@ void rec_millis_int_cb(){
     //don't know what to do with this yet
 }
 
-unsigned long catch_start(){
-    
+unsigned long catch_start(){}
+
+void rec_dnf(Packet * pack){
+    dnfBib = *(int*)pack->data;
 }
 
-unsigned long catch_interval(){
-    int state = 0;
-    while(true){
-        getEye()->distance();
-        if(getEye()->getLastDistance() < getFinishDistance() - 15){
-            return getTime();
+void rec_dnf_cb(){
+    //dnfStatus = true;
+}
+
+void catch_interval(){
+    intervalLoop = true;
+    if(switchTo(LORA)){
+        //next racer
+        setReceiveHandler(new_racer);
+        setReceiveCallback(new_racer_cb);
+        while(intervalLoop){
+            setI2COriginating(false);
+            getEye()->distance();
+            if(dnfStatus){
+                dnfStatus = false;
+                if(switchTo(SER)){
+                    setReceiveHandler(rec_dnf);
+                    setReceiveCallback(rec_dnf_cb);
+                    
+                    setSendHandler(send_time_init);
+                    setSendCallback(send_time_cb);
+                    
+                    interval = 0;
+
+                    while(!available());
+                    receive();                 
+
+                    //send confirmation of sending time
+                    send();
+
+                    //send interval
+                    send();
+
+                    //send racerCount
+                    send();
+                }
+
+
+                if(!switchTo(LORA) || racerCount <= 0){
+                    intervalLoop = false;
+                }
+
+                setReceiveHandler(new_racer);
+                setReceiveCallback(new_racer_cb);
+            }else if((getEye()->getLastDistance() < getFinishDistance() - 15 && getEye()->getLastDistance() > 0 && !available())){
+                interval = getTime();
+                
+                send_time();
+                
+
+                if(!switchTo(LORA) || racerCount <= 0){
+                    intervalLoop = false;
+                }
+
+                //to prevent double impulse problem
+                delay(200);
+
+                setReceiveHandler(new_racer);
+                setReceiveCallback(new_racer_cb);
+            }else if(available()){
+                receive();
+
+                if(!switchTo(LORA)){
+                    intervalLoop = false;
+                }
+                setReceiveHandler(new_racer);
+                setReceiveCallback(new_racer_cb);
+            }  
+
         }
     }
 }
@@ -554,7 +690,7 @@ void send_dev_info_cb(){
 
 //send callback
 void sen_wake_up_callback(){
-  while(!available());
+  while(!available()); //wait
   receive();
 }
 
@@ -591,12 +727,7 @@ void rec_device_parameters_cb(){
     addCount++;
   }else{
     addPos = addData;
-    //if the one we are adding is the position after us make it our next address
-    if(isI2COriginating()){
-        if(addPos == getMyPosition() + 1 || getNextAddress() == 255){
-            setNextAddress(addDev);
-        }
-    }
+
     addCount = 0;
     recv = true;
   }
@@ -619,6 +750,20 @@ void get_add_device_parameters(){
   setReceiveCallback(rec_device_parameters_cb);
 }
 
+void errorBlink(){
+    digitalWrite(ERR, HIGH);
+    delay(500);
+    digitalWrite(ERR, LOW);
+    delay(500);
+    digitalWrite(ERR, HIGH);
+    delay(500);
+    digitalWrite(ERR, LOW);
+    delay(500);
+    digitalWrite(ERR, HIGH);
+    delay(500);
+    digitalWrite(ERR, LOW);
+}
+
 void send_dev_params(){
     setSendHandler(sen_dev_params_init);
     setSendCallback(sen_dev_params_cb);
@@ -629,7 +774,36 @@ void rec_data(Packet * p){
     int data = *(int*) p->data;
 }
 
-void rec_data_cb(){}
+void rec_data_cb(){
+    if(senCount == 2){
+    }
+}
+
+Packet * sen_dev_error(){
+    return new Packet(&currentError, INT, sizeof(currentError), 0);
+}
+
+void sen_dev_error_cb(){
+    currentError = 0;
+    senCount = 0;
+    setSendCallback(NULL);
+    errorBlink();
+}
+
+void setResetFunction(func f){
+    resetFunc = f;
+}
+
+void sen_dev_params_err(int err){
+    //txDone(false);
+    if(switchTo(SER)){
+        //tell rpi there was an error
+        currentError = err;
+        setSendHandler(sen_dev_error);
+        setSendCallback(sen_dev_error_cb);
+        send();
+    }
+}
 
 void sen_dev_params_cb(){
   setReceiveHandler(rec_data);
@@ -641,6 +815,7 @@ void sen_dev_params_cb(){
     while(!available());
     receive(); 
     
+
     if(getCurrentConnection() == SER){        
         if(switchTo(LORA)){
             send();
@@ -651,7 +826,11 @@ void sen_dev_params_cb(){
         }
     }
   }else if(senCount == 3){
-    if(getCurrentConnection() == LORA){    
+    if(addPos == getThisAddress()+1){
+        setNextAddress(addDev);
+    }
+    if(getCurrentConnection() == LORA){
+
         if(switchTo(SER)){
             send();
         }
@@ -666,9 +845,10 @@ void sen_dev_params_cb(){
 Packet * sen_dev_params_init(){
   senCount++;
   if(senCount == 1){
-    return new Packet(&addDev, INT, sizeof(addDev), getMyPosition() + 1);
+    setSendAddress(addDev);
+    return new Packet(&addDev, INT, sizeof(addDev), addPos);
   }else if(senCount == 2){
-    return new Packet(&addPos, INT, sizeof(addPos), getMyPosition() + 1);
+    return new Packet(&addPos, INT, sizeof(addPos), addPos);
   }else{
     int confirm = 1;
     if(getCurrentConnection() == LORA){

@@ -13,11 +13,14 @@
 #define RFM95_CS 4
 #define RFM95_RST 2
 #define RFM95_INT 3
-
+#define OUT 7
+#define IN 8
+#define ERR 9
 
 enum Connection{NIL = 0, I2 = 1, SER = 2, SPIC = 3, LORA = 4};
 
 typedef void (* func) ();
+typedef void (* errFunc) (int);
 typedef void (* receivePack) (Packet *);
 typedef Packet * (* sendMessage) ();
 
@@ -26,6 +29,7 @@ static sendMessage beforePackCreation;
 
 static func receiveCallback = '\0';
 static func sendCallback = '\0';
+static errFunc errorFunction = '\0';
 
 static Connection currentConnection;
 static bool blocking = true;
@@ -49,7 +53,7 @@ static Connection temp;
 static RH_RF95 * driver ='\0';
 static RHReliableDatagram *  manager = '\0';
 
-
+bool initialize();
 int available();
 int getDeviceID();
 int getDeviceType();
@@ -71,6 +75,9 @@ void transmit();
 void setHandlers(receivePack, sendMessage);
 void setReceiveHandler(receivePack);
 void setSendHandler(sendMessage);
+func getSendCallback();
+func getReceiveCallback();
+void setErrorFunction(errFunc);
 bool switchTo(Connection);
 bool isI2COriginating();
 void setSendCallback(func);
@@ -81,6 +88,8 @@ void setBlocking(bool);
 void setNextAddress(uint8_t);
 void setPrevAddress(uint8_t);
 void setThisAddress(uint8_t);
+void setSendAddress(uint8_t);
+uint8_t getSendAddress();
 void m();
 uint8_t getPrevAddress();
 uint8_t getNextAddress();
@@ -90,4 +99,6 @@ void setMyPosition(uint8_t);
 Connection getCurrentConnection();
 void setI2COriginating(bool);
 RHReliableDatagram * getManager();
+void txDone(bool cb);
+void rxDone(bool cb, Packet * p = '\0');
 #endif;

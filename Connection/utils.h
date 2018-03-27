@@ -13,7 +13,9 @@
 
 static volatile bool receivedStartParams = false;
 static bool deviceTypeSent = false;
+static bool intervalLoop = false;
 static int bib = -1;
+static int timeCount = 0;
 static int startParamData = -1;
 static int deviceType = getDeviceType();
 static unsigned long start = 0;
@@ -25,6 +27,11 @@ static int seqStatus = -1;
 static uint8_t prevAdd = getPrevAddress();
 static uint8_t nextAdd = getNextAddress();
 static int startInfoCount = 0;
+static int newRacerConf = 0;
+static int racerCount = 0;
+static int racerInfoCount = 0;
+static bool dnfStatus = false;
+static int dnfBib = 0;
 
 void timing_mode();
 Packet * send_device_type();
@@ -51,7 +58,7 @@ void rec_millis_int(Packet *);
 void rec_millis_int_cb();
 void setStartTime(unsigned long);
 unsigned long catch_start();
-unsigned long catch_interval();
+void catch_interval();
 unsigned long getStartMillis();
 unsigned long getNextInterval();
 
@@ -67,11 +74,16 @@ void interval_rec_bib(Packet*);
 void interval_rec_bib_cb();
 Packet * send_interval();
 void send_interval_cb();
-Packet * send_time();
+Packet * send_time_init();
+void send_time();
 void send_time_cb();
 Packet * send_prev_interval();
 void send_prev_interval_cb();
-
+void new_racer(Packet *);
+void new_racer_cb();
+void interval_racer_init();
+void rec_dnf(Packet *);
+void rec_dnf_cb();
 
 /******Timing Eye********************/
 static TimingEye * eye = 0;
@@ -140,7 +152,10 @@ int getAddDevice();
 int getAddPosition();
 void sen_dev_params_cb();
 void send_dev_params();
+void sen_dev_params_err(int);
 Packet * sen_dev_params_init();
+Packet * sen_dev_error();
+void sen_dev_error_cb();
 
 /******Send Device Info functions********/
 
@@ -172,6 +187,10 @@ static int g = 0;
 static int q = 0;
 static int syncCount = 0;
 static int syncFunction = 0;
+static bool resetStat = false;
+
+bool getResetStatus();
+void setResetStatus(bool);
 void sync();
 void sync_rec();
 Packet * sync_init();
@@ -190,5 +209,11 @@ Packet * sync_master_sen_millis();
 void sync_master_sen_cb();
 unsigned long getTime();
 
-
+static int currentError = 0;
+static func resetFunc  ='\0';
+static func tempFunc = 0;
+void setResetFunction(func);
+void errorBlink();
+int getCurrentError();
+void setCurrentError(int);
 #endif;

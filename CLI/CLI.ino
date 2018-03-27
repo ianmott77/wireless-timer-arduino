@@ -2,40 +2,46 @@
 
 int pos = 0;
 int t = getDeviceID();
+int type = getDeviceType();
+
+void err(int errCode){
+	errorBlink();
+	if(errCode == 201){
+
+	}
+}
 
 void sen_c(){
-  if(getChoice() == 1){
-      //add device
-  	  uint8_t pre = getPrevAddress();
+	if(getChoice() == 1){
+      	//add device
+  	  	uint8_t pre = getPrevAddress();
 
-      send_dev_params();
-
-      setPrevAddress(pre);
-  }else if(getChoice() == 2){
-      //get previous device address so we can djust after the sync
-      uint8_t pre = getPrevAddress();
-      //synchronize devices
-      sync();
-      //correct the previous address
-      setPrevAddress(pre);
-  }else if(getChoice() == 4){
-    if(getDeviceType() == 1){
-        //this is a starter
-        starter();
-        if(switchTo(SER)){
-            setSendHandler(starter_send_start_millis);
-            setSendCallback(starter_send_start_millis_cb);
-            send();
-        }
-    }else if(getDeviceType() == 2){
-        //this is an interval
+      	send_dev_params();
+      	
+      	setPrevAddress(pre);
+  	}else if(getChoice() == 2){
+      	//get previous device address so we can djust after the sync
+      	uint8_t pre = getPrevAddress();
+      	//synchronize devices
+      	sync();
+      	//correct the previous address
+      	setPrevAddress(pre);
+  	}else if(getChoice() == 4){
+    	if(getDeviceType() == 1){
+        	//this is a starter
+        	starter();
+        	if(switchTo(SER)){
+            	setSendHandler(starter_send_start_millis);
+            	setSendCallback(starter_send_start_millis_cb);
+            	send();
+        	}
+    	}else if(getDeviceType() == 2){
+        	//this is an interval
+    	}else if(getDeviceType() == 3){
+        	//this is monitor node
         
-    }else if(getDeviceType() == 3){
-        //this is monitor node
-        
-    }
-  }
-  reset();
+    	}
+  	}
 }
 
 void rec_c(){
@@ -60,6 +66,7 @@ void rec_c(){
         setRecv(true);
     }
   }else{ 
+
   	//we're in LoRa mode here
     //here we need to check if this packet is supposed to come to us
     if(getNextAddress() != 255 || getPrevAddress() != 255){
@@ -73,6 +80,7 @@ void rec_c(){
             //this message was not intended for us
         }
     }
+
     if(getChoice() == 1){
       //1 == add device
       //set handlers/callbacks
@@ -81,7 +89,8 @@ void rec_c(){
       //receive the device ID being added
       while(!available());
       receive();
-        
+
+
       //recieve the position it's being added at
       while(!available());
       receive();
@@ -93,7 +102,7 @@ void rec_c(){
         
       //send info to the RPi
       wake_up_pi();
-       
+      
       //check if we woke up the Pi
       if(isPiAwake()){
 
@@ -106,11 +115,8 @@ void rec_c(){
             if(switchTo(SER)){
             	send_dev_params();
         	}
-            setChoiceSent(false);
         }
       }
-      setSendHandler(sen);
-      setSendCallback(sen_c);
     }else if(getChoice() == 2){
         sync_rec();
         
@@ -139,7 +145,6 @@ void rec_c(){
             
         }
     }
-    reset();
   }
 }
 
@@ -152,9 +157,9 @@ Packet * sen(){
   int g = getChoice();
   int next = getMyPosition() + 1;
   if(g == 1){
-      if(next == 255 || next == -1){
-         next = getAddPosition();
-      }
+    setErrorFunction(sen_dev_params_err);
+    setSendAddress(getAddDevice());
+    next = getAddPosition();
   }else if(g == 2){
       if(getMyPosition() != 1){
           next = getMyPosition() - 1;
@@ -169,65 +174,80 @@ Packet * sen(){
   return new Packet(&g, INT, sizeof(g), next);
 }
 
+void debugBlink(){
+	digitalWrite(6, HIGH);
+	delay(500);
+	digitalWrite(6, LOW);
+}
+
+void resetBlink(){
+	digitalWrite(OUT, HIGH);
+	digitalWrite(IN, HIGH);
+	digitalWrite(ERR, HIGH);
+	delay(500);
+	digitalWrite(OUT, LOW);
+	digitalWrite(IN, LOW);
+	digitalWrite(ERR, LOW);
+}
+
 void reset(){
-  switchTo(I2);
-  setBlocking(false);
-  setThisAddress(t);
-  setPiAwake(false);
-  setChoiceSent(false);
-  setRecv(false);
-  if(!switchTo(LORA))
-    Serial.println("init failed!");
-  setReceiveCallback(rec_c);
-  setSendCallback(sen_c);
-  setHandlers(rec, sen);
-  if(getDeviceType() == 2){
+  	setBlocking(false);
+  	setI2COriginating(false);
+  	setThisAddress(t);
+  	setPiAwake(false);
+  	setChoiceSent(false);
+  	setRecv(false);
   	setHasFoundDistance(false);
-    initEye();
-  }
-  /*this waits until either an I2C master has sent some information, or there is information
-  available via LoRa connection, if hasRecv() then it's I2C, if available() then it's LoRa
-  */
-  while(available() <= 0 && !hasRecv());
-  if(getChoice() == 204){
-      bool rec = false;
-      bool sen = false;
-      find_timing_distance();
-      for(int i = 0; !hasFoundDistance(); i++){
-          getEye()->distance();
-          if(!rec && !sen){
-              receive();
-              rec = true;
-          }else if(rec && ! sen){
-              send();
-              sen = true;
-          }
-          if(sen && rec){
-              sen = false;
-              rec = false;
-          }
-      }    
-    setChoice(0);
-    reset();
-  }
-  setReceiveCallback(rec_c);
-  setSendCallback(sen_c);
-  setHandlers(rec, sen);
-  if(hasRecv()){
-    //I2C, but sends via LoRa
-    if(switchTo(LORA))
-        send();
-  }else{
-    //LoRa
-    receive();
-  }
+  	setResetStatus(false);
+  	setCurrentError(0);
+  	setChoice(0);
+  	setSendAddress(255);
+  	setReceiveCallback(rec_c);
+  	setSendCallback(sen_c);
+  	setHandlers(rec, sen);
+  	setErrorFunction(err);
+  	setResetFunction(reset);
+  	switchTo(LORA);
 }
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   pinMode(START, INPUT_PULLUP);
   while (!Serial);
+  initialize();
+  initEye();
+  resetBlink();
   reset();
 }
 
-void loop() {}
+void loop() {
+	 /*this waits until either an I2C master has sent some information, or there is information
+  available via LoRa connection, if hasRecv() then it's I2C, if available() then it's LoRa
+  */
+  	if(available() || hasRecv() || getResetStatus()){
+  		bool skip = (hasRecv || available()) ? false : true;
+  		if(getChoice() == 204){
+  			skip = true;
+			find_timing_distance();
+			while(!hasFoundDistance()){
+				getEye()->distance();  
+			}
+    		setChoice(0);
+  		}
+  		if(!skip){
+  			setReceiveCallback(rec_c);
+  			setSendCallback(sen_c);
+  			setHandlers(rec, sen);
+  			if(hasRecv()){
+    			//I2C, but sends via LoRa
+    			if(switchTo(LORA)){
+        			send();
+    			}
+  			}else{
+    			//LoRa
+    			receive();
+  			}
+		}
+		reset();
+	}
+}
