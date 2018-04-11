@@ -1,5 +1,5 @@
 #include <utils.h>
-
+#define DEBUG 6
 int pos = 0;
 int t = getDeviceID();
 int type = getDeviceType();
@@ -17,7 +17,7 @@ void sen_c(){
   	  	uint8_t pre = getPrevAddress();
 
       	send_dev_params();
-      	
+
       	setPrevAddress(pre);
   	}else if(getChoice() == 2){
       	//get previous device address so we can djust after the sync
@@ -34,7 +34,22 @@ void sen_c(){
             	setSendHandler(starter_send_start_millis);
             	setSendCallback(starter_send_start_millis_cb);
             	send();
+            	if(getRaceMode() == 3){
+        			if(switchTo(LORA)){
+        				//wiat for the pace time to be sent back to us
+        				setReceiveHandler(rec_pace_time);
+        				setReceiveCallback(rec_pace_time_cb);
+
+        				while(!available()); //wait
+        				receive();
+        				
+        				if(switchTo(SER)){
+        					send_pace_time_init();
+        				}
+					}
+        		}
         	}
+
     	}else if(getDeviceType() == 2){
         	//this is an interval
     	}else if(getDeviceType() == 3){
@@ -138,6 +153,10 @@ void rec_c(){
             //receive start time
             while(!available());
             receive();
+
+            //receive race mode
+            while(!available());
+            receive();
             
             
         }else if(getDeviceType() == 3){
@@ -160,11 +179,15 @@ Packet * sen(){
     setErrorFunction(sen_dev_params_err);
     setSendAddress(getAddDevice());
     next = getAddPosition();
+    setI2COriginating(false);
+    switchTo(LORA);
   }else if(g == 2){
       if(getMyPosition() != 1){
           next = getMyPosition() - 1;
       }
   }else if(g == 4){
+  	setI2COriginating(false);
+    switchTo(LORA);
     int state = digitalRead(START);
     while(state == 0){
         state = digitalRead(START);

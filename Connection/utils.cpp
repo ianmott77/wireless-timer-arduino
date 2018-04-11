@@ -24,6 +24,10 @@ bool getResetStatus(){
     return resetStat;
 }
 
+int getRaceMode(){
+    return raceMode;
+}
+
 void setResetStatus(bool res){
     resetStat = res;
 }
@@ -67,6 +71,14 @@ bool isSendingDistance(){
     return sendingDistance;
 }
 
+int getPaceTime(){
+    return paceTime;
+}
+
+void setPaceTime(int pace){
+    paceTime = pace;
+}
+
 void rec_confirm_distance(Packet * pack){
     recData = true;
     confDistData = *(int*) pack->data;
@@ -82,6 +94,14 @@ void rec_confirm_distance_cb(){
 
 int getFinishDistance(){
     return finishDistance;
+}
+
+int getPaceInterval(){
+    return paceInterval;
+}
+
+void setPaceInterval(int pace){
+    paceInterval = pace;
 }
 
 void setHasFoundDistance(bool status){
@@ -154,6 +174,10 @@ void new_racer_cb(){
         while(!available());
         receive();
 
+        //receive race mode
+        while(!available());
+        receive();
+
     }else if(newRacerConf == 0){
         dnfStatus = true;
     }
@@ -173,6 +197,15 @@ void interval_rec_millis(Packet* pack){
 }
 
 void interval_rec_millis_cb(){
+    setReceiveHandler(interval_rec_race_type);
+    setReceiveCallback(interval_rec_race_type_cb);
+}
+
+void interval_rec_race_type(Packet * pack){
+    raceMode = *(int*) pack->data;
+}
+
+void interval_rec_race_type_cb(){
     interval_racer_init();
     if(!intervalLoop){
         catch_interval();
@@ -188,11 +221,13 @@ Packet * send_prev_interval(){
     }else if(startInfoCount == 3){
         int time = getTime() - start;
         return new Packet(&time, INT, sizeof(time), 0);
+    }else if(startInfoCount == 4){
+        return new Packet(&raceMode, INT, sizeof(raceMode), 0);
     }
 }
 
 void send_prev_interval_cb(){
-    if(startInfoCount < 3){
+    if(startInfoCount < 4){
         send();
     }else{
         startInfoCount = 0;
@@ -220,7 +255,15 @@ void interval_racer_init(){
     }
 }
 
+void rec_confirm_time(Packet * p) {
+    lastTime = *(unsigned long*) p->data;
+}
 
+void rec_confirm_time_cb(){
+    if(lastTime  != 1){
+        racerCount--;
+    }
+}
 
 void send_time(){
     setPiAwake(false);
@@ -230,7 +273,9 @@ void send_time(){
     
 
     //check if we woke up the Pi
-    if(isPiAwake()){        
+    if(isPiAwake()){  
+        setReceiveHandler(rec_confirm_time);
+        setReceiveCallback(rec_confirm_time_cb);      
         setSendHandler(send_time_init);
         setSendCallback(send_time_cb);
 
@@ -242,6 +287,9 @@ void send_time(){
 
         //send racerCount
         send();
+
+        while(!available()); //wait
+        receive();
 
     }
 }
@@ -258,9 +306,7 @@ Packet * send_time_init(){
 }
 
 void send_time_cb(){
-    if(timeCount == 2){
-        racerCount--;
-    }else if(timeCount > 2){
+    if(timeCount > 2){
         timeCount = 0;
     }
 }
@@ -278,9 +324,13 @@ void rec_start_params(Packet* pack){
 }
 
 void rec_start_params_cb(){
-    if(startParamData != -1){
+    recParamsCount++;
+    if(recParamsCount == 1){
+        raceMode = startParamData;
+    }else if(recParamsCount == 2){
         bib = startParamData;
         int state = 0;
+        recParamsCount = 0;
         setRecv(true);
     }
 }
@@ -308,7 +358,19 @@ Packet * starter_send_start_millis(){
 }
 
 void starter_send_start_millis_cb(){
-     //the start was sent let it fall back to reset();
+    if(getCurrentConnection() == LORA){
+        setSendHandler(starter_send_race_type);
+        setSendCallback(starter_send_race_type_cb);
+        send();
+    }
+}
+
+Packet * starter_send_race_type(){
+    return new Packet(&raceMode, INT, sizeof(raceMode), getMyPosition() + 1);
+}
+
+void starter_send_race_type_cb(){
+    //drop back to main
 }
 
 void rec_millis_int(Packet * pack){
@@ -326,65 +388,45 @@ void rec_dnf(Packet * pack){
 }
 
 void rec_dnf_cb(){
-    //dnfStatus = true;
+
 }
+void send_pace_time_init(){
+    setSendHandler(send_pace_time);
+    setSendCallback(send_pace_time_cb);
+    send();
+}
+
+Packet * send_pace_time(){
+    int pos = (getCurrentConnection() == LORA) ? getMyPosition() - 1 : 0;
+    return new Packet(&paceTime, ULONG, sizeof(paceTime), pos);
+}
+
+void send_pace_time_cb(){}
+
+void rec_pace_time(Packet * pack){
+    paceTime = *(unsigned long*) pack->data;
+}
+
+void rec_pace_time_cb(){}
 
 void catch_interval(){
     intervalLoop = true;
+
     if(switchTo(LORA)){
         //next racer
         setReceiveHandler(new_racer);
         setReceiveCallback(new_racer_cb);
+        bool finisher = false;
+        bool interrupt = false;
         while(intervalLoop){
+            //make sure we set this to false otherwise it can mess with the currentConnection
             setI2COriginating(false);
-            getEye()->distance();
-            if(dnfStatus){
-                dnfStatus = false;
-                if(switchTo(SER)){
-                    setReceiveHandler(rec_dnf);
-                    setReceiveCallback(rec_dnf_cb);
-                    
-                    setSendHandler(send_time_init);
-                    setSendCallback(send_time_cb);
-                    
-                    interval = 0;
+            for(int i = 0; i < 50; i++){
+                getEye()->distance();
+            }
 
-                    while(!available());
-                    receive();                 
-
-                    //send confirmation of sending time
-                    send();
-
-                    //send interval
-                    send();
-
-                    //send racerCount
-                    send();
-                }
-
-
-                if(!switchTo(LORA) || racerCount <= 0){
-                    intervalLoop = false;
-                }
-
-                setReceiveHandler(new_racer);
-                setReceiveCallback(new_racer_cb);
-            }else if((getEye()->getLastDistance() < getFinishDistance() - 15 && getEye()->getLastDistance() > 0 && !available())){
-                interval = getTime();
-                
-                send_time();
-                
-
-                if(!switchTo(LORA) || racerCount <= 0){
-                    intervalLoop = false;
-                }
-
-                //to prevent double impulse problem
-                delay(200);
-
-                setReceiveHandler(new_racer);
-                setReceiveCallback(new_racer_cb);
-            }else if(available()){
+            //check for available packets via LoRa indicating a new racer has started
+            if(available() > 0){
                 receive();
 
                 if(!switchTo(LORA)){
@@ -392,11 +434,105 @@ void catch_interval(){
                 }
                 setReceiveHandler(new_racer);
                 setReceiveCallback(new_racer_cb);
-            }  
+            }else{
+                                
+                if(dnfStatus){ //check if someone has clicked the DNF button
+                
+                    dnfStatus = false;
+                    finisher = true;
+                    if(switchTo(SER)){
 
+                        setReceiveHandler(rec_dnf);
+                        setReceiveCallback(rec_dnf_cb);
+                    
+                        //this is not the same a send time becaue the monitor is cancelled by the RPi when DNF button is hit
+                        setSendHandler(send_time_init);
+                        setSendCallback(send_time_cb);
+                    
+                        //set the interval to 0 to indicate a DNF
+                        interval = 0;
+
+                        //wait for the packets to become available with the bib of the DNF
+                        while(!available());
+                        receive();                 
+
+                        setReceiveHandler(rec_confirm_time);
+                        setReceiveCallback(rec_confirm_time_cb); 
+
+                        //send confirmation of sending time
+                        send();
+
+                        //send interval
+                        send();
+
+                        //send racerCount
+                        send();
+
+                        //recieve time confirm
+                        while(!available());
+                        receive();
+                    }
+
+
+                    if(!switchTo(LORA) || racerCount <= 0){
+                        intervalLoop = false;
+                    }
+
+                    setReceiveHandler(new_racer);
+                    setReceiveCallback(new_racer_cb);
+                }else if((getEye()->getLastDistance() < getFinishDistance() - 15 && getEye()->getLastDistance() > 0) && available() <= 0){ //check if something has made the finish distance at least 15cm shroter
+                
+                    interval = getTime();
+                
+                    //make sure there are no available packets because an interrupt is signaled when a new packet is recived via LoRa and it causes inconsistent distance measurements
+                    if(available() <= 0){
+
+                        finisher = true;
+                    
+                        send_time();
+                
+                        if(!switchTo(LORA) || racerCount <= 0){
+                            intervalLoop = false;
+                        }
+
+                        setReceiveHandler(new_racer);
+                        setReceiveCallback(new_racer_cb);
+                    }else{
+                        digitalWrite(ERR, HIGH);
+                    }
+                }
+            }
+        }
+        
+        /*this check stays out of the intervalLoop because when setting a pace it will always exit the interval loop because 
+        only one time is measured while setting the pace and then returns to the default state*/
+        //check to see if we are setting the pace
+        if(raceMode == 3 && finisher){
+            
+            //switch the race mode to pace mode 
+            raceMode = 2;
+
+            //set finisher to false
+            finisher = false;
+            //receive the pace time from the RPi
+            if(switchTo(SER)){
+                setReceiveHandler(rec_pace_time);
+                setReceiveCallback(rec_pace_time_cb);
+
+                while(!available()); //wait
+                receive();
+                            
+                if(switchTo(LORA)){
+                    //send the pace time back to the start 
+                    send_pace_time_init();
+                }
+            }
+            setReceiveHandler(new_racer);
+            setReceiveCallback(new_racer_cb);
         }
     }
 }
+
 
 unsigned long getStartMillis(){
     return start;

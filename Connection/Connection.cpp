@@ -98,6 +98,7 @@ bool initialize(){
 bool switchTo(Connection c){
     if(c != SER && c != I2 && c != SPIC && c != LORA) 
         return false;
+    
     currentConnection = c;
     if(currentConnection == LORA){
          if (!manager->init()){
@@ -315,8 +316,11 @@ long readLong(){
     } long_union;
 
     if(currentConnection != LORA){        
-        for(int i = 0; i < 4; i++){
-            long_union.buf[i] = read();
+        while(available() < 4);    
+        if(available() >= 4){
+            for(int i = 0; i < 4; i++){
+                long_union.buf[i] = read();
+            }
         }
     }else{
         uint8_t * buf = malloc(4);
@@ -351,9 +355,12 @@ unsigned long readULong(){
         unsigned long val;
     } long_union;
 
-    if(currentConnection != LORA){        
-        for(int i = 0; i < 4; i++){
-            long_union.buf[i] = read();
+    if(currentConnection != LORA){    
+        while(available() < 4);    
+        if(available() >= 4){
+            for(int i = 0; i < 4; i++){
+                long_union.buf[i] = read();
+            }
         }
     }else{
         uint8_t * buf = malloc(4);

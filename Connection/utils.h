@@ -32,7 +32,14 @@ static int racerCount = 0;
 static int racerInfoCount = 0;
 static bool dnfStatus = false;
 static int dnfBib = 0;
+static int recParamsCount = 0;
+static int raceMode = 0;
+static int paceInterval = 10000;
+static unsigned long paceTime = 0;
+static unsigned long lastTime = 1;
 
+//general functions
+int getRaceMode();
 void timing_mode();
 Packet * send_device_type();
 void send_device_type_cb();
@@ -41,6 +48,14 @@ void rec_start_params_cb();
 void timing_mode_init();
 bool hasReceivedStartParams();
 bool hasDeviceTypeSent();
+int getPaceInterval();
+void setPaceInterval(int);
+int getPaceTime();
+void setPaceTime(int);
+void rec_pace_time(Packet*);
+void rec_pace_time_cb();
+void rec_confirm_time(Packet*);
+void rec_confirm_time_cb();
 
 //starter
 void starter();
@@ -52,13 +67,14 @@ Packet * send_bib();
 void send_bib_cb();
 Packet * starter_send_start_millis();
 void starter_send_start_millis_cb();
+Packet * starter_send_race_type();
+void starter_send_race_type_cb();
 void rec_seq_started(Packet *);
 void rec_seq_started_cb();
 void rec_millis_int(Packet *);
 void rec_millis_int_cb();
 void setStartTime(unsigned long);
 unsigned long catch_start();
-void catch_interval();
 unsigned long getStartMillis();
 unsigned long getNextInterval();
 
@@ -72,6 +88,8 @@ void interval_rec_millis(Packet*);
 void interval_rec_millis_cb();
 void interval_rec_bib(Packet*);
 void interval_rec_bib_cb();
+void interval_rec_race_type(Packet *);
+void interval_rec_race_type_cb();
 Packet * send_interval();
 void send_interval_cb();
 Packet * send_time_init();
@@ -84,6 +102,10 @@ void new_racer_cb();
 void interval_racer_init();
 void rec_dnf(Packet *);
 void rec_dnf_cb();
+void catch_interval();
+Packet * send_pace_time();
+void send_pace_time_cb();
+void send_pace_time_init();
 
 /******Timing Eye********************/
 static TimingEye * eye = 0;
