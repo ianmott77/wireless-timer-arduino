@@ -77,11 +77,13 @@ void setI2COriginating(bool orig){
 RHReliableDatagram * getManager(){
     return manager;
 }
+
 bool initialize(){
     pinMode(IN, OUTPUT);
     pinMode(OUT, OUTPUT);
     pinMode(ERR, OUTPUT);
     Wire.begin(SLAVE_ADDRESS);
+    Wire.setClock(400000UL);
     Wire.onReceive(wireReceiver);
     Wire.onRequest(sendWire); 
     driver = new RH_RF95(RFM95_CS, RFM95_INT);

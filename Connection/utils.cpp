@@ -86,7 +86,7 @@ void rec_confirm_distance(Packet * pack){
 
 void rec_confirm_distance_cb(){
     recData = false;
-    if(confDistData >= 0){
+    if(confDistData > 0){
         finishDistance = confDistData;
         foundDistance = true;
     }
@@ -126,7 +126,7 @@ void send_distance_cb(){
 }
 
 void initEye(){
-    eye = new TimingEye(MONITOR, TRIGGER);
+    eye = new TimingEye(1, MONITOR, TRIGGER);
     eye->init();
 }
 
@@ -178,7 +178,7 @@ void new_racer_cb(){
         while(!available());
         receive();
 
-    }else if(newRacerConf == 0){
+    }else if(newRacerConf == 10){
         dnfStatus = true;
     }
 }
@@ -413,96 +413,81 @@ void catch_interval(){
     intervalLoop = true;
 
     if(switchTo(LORA)){
-        //next racer
+
+        bool finisher = false;
+        bool interrupt = false; //true becuase when first called it's immediatley after recieving a packet via LoRa
+        bool caught = false;
+        bool go = true;
+        bool cor = false;
+
         setReceiveHandler(new_racer);
         setReceiveCallback(new_racer_cb);
-        bool finisher = false;
-        bool interrupt = false;
+        
+        
         while(intervalLoop){
             //make sure we set this to false otherwise it can mess with the currentConnection
             setI2COriginating(false);
-            for(int i = 0; i < 50; i++){
-                getEye()->distance();
-            }
+            
+            finisher = false;
 
-            //check for available packets via LoRa indicating a new racer has started
-            if(available() > 0){
-                receive();
+            /*this loop checks all the variables that would cause something to happen while inside the interval loop
+            and will break out of this loop when something is supposed to happen*/
 
-                if(!switchTo(LORA)){
-                    intervalLoop = false;
-                }
-                setReceiveHandler(new_racer);
-                setReceiveCallback(new_racer_cb);
-            }else{
-                                
-                if(dnfStatus){ //check if someone has clicked the DNF button
-                
-                    dnfStatus = false;
-                    finisher = true;
-                    if(switchTo(SER)){
+            while(go){
 
-                        setReceiveHandler(rec_dnf);
-                        setReceiveCallback(rec_dnf_cb);
-                    
-                        //this is not the same a send time becaue the monitor is cancelled by the RPi when DNF button is hit
-                        setSendHandler(send_time_init);
-                        setSendCallback(send_time_cb);
-                    
-                        //set the interval to 0 to indicate a DNF
-                        interval = 0;
-
-                        //wait for the packets to become available with the bib of the DNF
-                        while(!available());
-                        receive();                 
-
-                        setReceiveHandler(rec_confirm_time);
-                        setReceiveCallback(rec_confirm_time_cb); 
-
-                        //send confirmation of sending time
-                        send();
-
-                        //send interval
-                        send();
-
-                        //send racerCount
-                        send();
-
-                        //recieve time confirm
-                        while(!available());
-                        receive();
-                    }
-
-
-                    if(!switchTo(LORA) || racerCount <= 0){
-                        intervalLoop = false;
-                    }
-
-                    setReceiveHandler(new_racer);
-                    setReceiveCallback(new_racer_cb);
-                }else if((getEye()->getLastDistance() < getFinishDistance() - 15 && getEye()->getLastDistance() > 0) && available() <= 0){ //check if something has made the finish distance at least 15cm shroter
-                
+                if(getEye()->quickDistance() < getFinishDistance() - 15){ //checks for someone crossing the line
                     interval = getTime();
-                
-                    //make sure there are no available packets because an interrupt is signaled when a new packet is recived via LoRa and it causes inconsistent distance measurements
-                    if(available() <= 0){
+                    caught = true;
+                    go = false;
+                }else if(available()){ //checks for a new message 
+                    interrupt = true;
+                    go = false;
+                }
 
-                        finisher = true;
-                    
-                        send_time();
-                
-                        if(!switchTo(LORA) || racerCount <= 0){
-                            intervalLoop = false;
+                if(!caught && !interrupt){ //checks for a DNF
+                    if(switchTo(SER)){
+                        if(available()){
+                            //receive signal that there is a dnf
+                            receive();
+                            
+                            //check that it was a DNF that happened before breaking the loop
+                            if(dnfStatus){
+                                go = false;
+                            }
+
+                        }else{
+                            switchTo(LORA);
                         }
-
-                        setReceiveHandler(new_racer);
-                        setReceiveCallback(new_racer_cb);
-                    }else{
-                        digitalWrite(ERR, HIGH);
                     }
                 }
             }
-        }
+
+            if(caught || dnfStatus && !interrupt){ //what to do with either a DNF or someone crossing the line
+                if(dnfStatus) interval = 0;
+                
+                caught = false;
+                dnfStatus = false;
+                finisher = true;
+                    
+                send_time();                   
+
+            }else if(interrupt && !dnfStatus && !caught){ //what to do with a new message  
+
+                receive();
+                
+                interrupt = false;
+            }
+
+            //make sure that we switch into the proper mode and that we still want to me in race mode
+            if(!switchTo(LORA) || racerCount <= 0){
+                intervalLoop = false;
+            }else{
+                go = true;
+            }
+
+            setReceiveHandler(new_racer);
+            setReceiveCallback(new_racer_cb);
+        }          
         
         /*this check stays out of the intervalLoop because when setting a pace it will always exit the interval loop because 
         only one time is measured while setting the pace and then returns to the default state*/
@@ -514,6 +499,7 @@ void catch_interval(){
 
             //set finisher to false
             finisher = false;
+
             //receive the pace time from the RPi
             if(switchTo(SER)){
                 setReceiveHandler(rec_pace_time);
